@@ -1,0 +1,8 @@
+# Pinned-loosely runtime dependencies; see pyproject.toml for the canonical list.
+tcgdex-sdk>=2.3.0
+google-genai>=1.0.0
+pydantic>=2.6
+click>=8.1
+rich>=13.7
+python-dotenv>=1.0
+tenacity>=8.3
