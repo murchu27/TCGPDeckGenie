@@ -31,10 +31,59 @@ def test_card_compact_dict_drops_empty_fields():
     assert d["cat"] == "P"
     assert d["type"] == "Water"
     assert d["stage"] == "Basic"
+    assert d["kopts"] == 1
     assert d["attacks"][0]["cost"] == "WWC"
     # No empty noise:
     assert "abilities" not in d
     assert "weak" not in d
+
+
+def _pokemon(name: str, **kw) -> Card:
+    return Card(
+        id=kw.pop("id", "X-001"),
+        name=name,
+        set_id="X",
+        category="Pokemon",
+        hp=kw.pop("hp", 100),
+        types=kw.pop("types", ["Water"]),
+        stage=kw.pop("stage", "Basic"),
+        **kw,
+    )
+
+
+def test_ko_points_three_for_mega():
+    assert _pokemon("Mega Venusaur ex", suffix="EX", rarity="Four Diamond").ko_points == 3
+    # "Mega" wins even without a high rarity recorded.
+    assert _pokemon("Mega Gengar", rarity=None).ko_points == 3
+
+
+def test_ko_points_two_for_four_diamond_and_ex():
+    assert _pokemon("Charizard ex", suffix="EX").ko_points == 2
+    # Rarity-driven even when the ex suffix is absent.
+    assert _pokemon("Some Beefy Pokemon", rarity="Four Diamond").ko_points == 2
+
+
+def test_ko_points_one_for_ordinary_pokemon():
+    assert _pokemon("Squirtle", rarity="One Diamond").ko_points == 1
+    assert _pokemon("Pidgey", rarity=None).ko_points == 1
+
+
+def test_ko_points_zero_for_trainers():
+    trainer = Card(
+        id="A1-223",
+        name="Giovanni",
+        set_id="A1",
+        category="Trainer",
+        trainer_type="Supporter",
+        rarity="Four Diamond",  # rarity must not matter for non-Pokémon
+    )
+    assert trainer.ko_points == 0
+
+
+def test_compact_dict_reports_kopts_for_ex():
+    d = _pokemon("Charizard ex", suffix="EX").compact_dict()
+    assert d["kopts"] == 2
+    assert d["suffix"] == "EX"
 
 
 def test_compact_dict_for_trainer():

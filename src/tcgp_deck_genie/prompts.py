@@ -27,21 +27,65 @@ POCKET_RULES_BLOCK = f"""\
 Pokémon TCG Pocket deck construction rules:
 - A deck contains exactly {DECK_SIZE} cards.
 - At most {MAX_COPIES_PER_NAME} copies of any single card name.
-- A deck must include at least one Basic Pokémon.
-- The deck's Energy Zone uses {MAX_ENERGY_TYPES} or fewer energy types; energy cards
-  are NOT part of the {DECK_SIZE}-card list (they're generated automatically each turn).
-- Evolution chains must be supported: to play a Stage 1 you need its Basic;
-  to play a Stage 2 you need its Basic + Stage 1.
-- Pokémon ex give the opponent 2 points when KO'd instead of 1, so they are
-  high-reward / high-risk picks.
+- A deck must include at least one Basic Pokémon (you cannot start a game without
+  one in play).
+- The Energy Zone uses {MAX_ENERGY_TYPES} or fewer energy types and generates
+  exactly ONE energy per turn; energy cards are NOT part of the {DECK_SIZE}-card
+  list. Because energy arrives one at a time, high-cost attacks take several turns
+  to switch on - watch each attacker's energy curve.
+- The bench holds at most 3 Pokémon, so board space is scarce.
+
+EVOLUTION (decks are routinely INVALID here - get this right):
+- A Stage 1 can only enter play by evolving its Basic; a Stage 2 only by evolving
+  Basic -> Stage 1. There is no other way to put an evolution into play.
+- Therefore EVERY evolution card you include MUST have its entire lower chain in
+  the SAME deck. Treat an evolution line as one indivisible unit: e.g. to run
+  Blastoise ex you must also run Wartortle AND Squirtle. The candidate list is
+  pre-loaded with the required pre-evolutions - include them. As a rule of thumb
+  run at least as many copies of each lower stage as the stage above it.
+- A pre-evolution feeds EVERY card that evolves from it, so count those cards
+  TOGETHER, not separately. The total copies of all forms sharing a stage can
+  never exceed the copies of their shared pre-evolution available to evolve from
+  (and that pre-evolution is itself capped at 2). Concretely: "Primarina ex" and
+  plain "Primarina" both evolve from Brionne (<- Popplio), so with at most 2
+  Popplio and 2 Brionne you can only ever field 2 Primarina TOTAL. Running, say,
+  2 Primarina ex + 1 Primarina is wasteful - the 3rd copy is a dead card that can
+  never be played. Pick the split you want across variant final forms, but keep
+  their combined count within what the pre-evolution line can actually support.
+
+PRIZES / WIN CONDITION:
+- The game is won at 3 points. When the opponent KOs one of your Pokémon they
+  score that Pokémon's `kopts` value: 3 (an instant loss) for a Pokémon with
+  "Mega" in its name, 2 for any other 4-diamond Pokémon (this includes most ex),
+  and 1 for everything else.
+- High-`kopts` attackers are powerful and worth running, but conceding 2-3 points
+  per KO loses the race fast. Only lean on them if the deck can keep them alive
+  (healing) or pull them out of danger (switching / abilities).
+
+ENERGY ECONOMY & RETREAT:
+- Retreating the Active Pokémon costs discarding energy equal to its `retreat`
+  value, and you only generate ~1 energy/turn, so pivoting is slow and expensive.
+  Favour a main attacker with a low retreat cost, or pack switching support if the
+  plan needs to reposition.
+
+FOCUS (this matters as much as raw card power):
+- Commit to ONE primary win condition built around a single main attacker line
+  (occasionally two lines that share the same plan). Pokémon pulling in different
+  directions waste your one-energy-per-turn tempo, clog the 3-slot bench, and crowd
+  out the Trainers that make a deck consistent.
+- Incidental pairwise synergy between otherwise-unrelated attackers is NOT a
+  substitute for a coherent gameplan. After locking your core line, spend the
+  remaining slots on Trainers (draw, search, switching, healing) and minimal
+  support Pokémon - not on yet more standalone attackers.
 
 When designing decks, optimise for:
-  1. SYNERGY between cards (combos, ability + attack chains, supporter timing).
-  2. STANDALONE UTILITY - some cards (e.g. draw supporters, switch tools, high-HP
-     attackers with cheap costs) are valuable in almost any deck regardless of
-     synergy.
-  3. CONSISTENCY - too many high-cost Stage-2 lines without supporting draw or
-     search is unreliable.
+  1. A coherent, FOCUSED gameplan that every Pokémon advances together.
+  2. SYNERGY that serves that plan (ability + attack chains, supporter timing,
+     energy acceleration, switching).
+  3. STANDALONE UTILITY - some cards (draw/search supporters, switch tools, cheap
+     reliable attackers) earn a slot in almost any deck regardless of synergy.
+  4. CONSISTENCY - complete evolution lines, enough draw/search, a sane energy
+     curve, and a realistic answer to the prize race.
 """.strip()
 
 
@@ -120,6 +164,19 @@ def deck_user_prompt(
     return (
         "Design a 20-card Pokémon TCG Pocket deck using ONLY the cards in "
         "`candidates`. Honour `must_include_card_ids` if any are present.\n\n"
+        "Hard requirements (a deck that breaks these is wrong):\n"
+        f"- The `cards` list must sum to EXACTLY {DECK_SIZE} cards. Add up every "
+        "entry's `count` and confirm the total before answering; do not under- or "
+        "over-fill.\n"
+        "- Include the COMPLETE pre-evolution chain for every evolution Pokémon "
+        "you use. The candidates already contain the needed pre-evolutions (some "
+        "may be off-type Basics like Eevee); add them, with counts at least equal "
+        "to the stage above.\n"
+        "- Build around ONE focused gameplan. Do not pack in many unrelated "
+        "attacker lines - prefer one core line plus Trainers for consistency.\n"
+        "- Account for the `retreat` cost, the one-energy-per-turn tempo, and the "
+        "prize race (`kopts`): make sure you can actually power up, protect, or "
+        "reposition your attackers before they are knocked out.\n\n"
         "Fill `key_synergies` with concrete 1-line notes that name the cards "
         "involved (e.g. 'Misty + Articuno ex: heads-flip energy accel feeds "
         "Blizzard early'). Fill `standalone_value` with cards picked for raw "

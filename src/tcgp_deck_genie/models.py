@@ -98,6 +98,28 @@ class Card(BaseModel):
     def is_basic(self) -> bool:
         return self.is_pokemon and (self.stage == "Basic")
 
+    @property
+    def ko_points(self) -> int:
+        """Prize points the opponent scores for knocking this Pokémon out.
+
+        TCG Pocket is won at 3 points. A KO is worth:
+          * 3 (an instant loss) for a Pokémon with "Mega" in its name,
+          * 2 for any other 4-diamond Pokémon (which includes essentially all
+            ``ex`` cards), and
+          * 1 for everything else.
+
+        Non-Pokémon cards are never knocked out, so they score 0. We treat the
+        ``ex`` suffix as 2-point even when the rarity string is missing (some
+        promos lack a rarity) because ``ex`` always give up 2 points in-game.
+        """
+        if not self.is_pokemon:
+            return 0
+        if "mega" in self.name.lower():
+            return 3
+        if self.is_ex or (self.rarity and "four diamond" in self.rarity.lower()):
+            return 2
+        return 1
+
     def primary_type(self) -> str | None:
         return self.types[0] if self.types else None
 
@@ -114,6 +136,8 @@ class Card(BaseModel):
                     "hp": self.hp,
                     "type": self.primary_type(),
                     "stage": self.stage,
+                    # Prize points the opponent scores for KO'ing this Pokémon.
+                    "kopts": self.ko_points,
                 }
             )
             if self.evolve_from:

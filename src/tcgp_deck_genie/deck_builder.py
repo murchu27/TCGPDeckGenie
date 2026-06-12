@@ -12,6 +12,11 @@ The two-stage funnel is the key cost-saving design:
    ``DeckPlan`` with explicit notes on synergy, standalone value, and
    weaknesses.
 
+Before the reasoning step we re-inject the full pre-evolution chain of every
+evolution card (``_with_evolution_support``) so the model can always build a
+legal line - even when an off-type Basic (e.g. Colorless Eevee under a Water
+Vaporeon) was stripped out by the energy filter.
+
 The validator at the end enforces the format constraints we cannot rely on the
 LLM to always honour (exact 20 cards, ≤2 copies, energy consistency, evolution
 support).
@@ -112,6 +117,16 @@ class DeckBuilder:
             )
             shortlisted_size = len(shortlisted_cards)
             candidates_for_reasoning = shortlisted_cards
+
+        # Guarantee the reasoning model can build complete evolution lines: pull
+        # in the full pre-evolution chain (from the whole corpus) of every
+        # evolution card it will see. This is essential because off-type
+        # pre-evolutions - e.g. the Colorless Basic Eevee under a Water Vaporeon -
+        # are stripped out by the energy filter and would otherwise never reach
+        # the model, making a valid line impossible.
+        candidates_for_reasoning = _with_evolution_support(
+            candidates_for_reasoning, self._corpus
+        )
 
         deck = self._build_deck(options, energy, candidates_for_reasoning)
         used_cards = [self._by_id[e.card_id] for e in deck.cards if e.card_id in self._by_id]
@@ -236,6 +251,44 @@ def _merge_must_include(
     return cards
 
 
+def _index_pokemon_by_name(corpus: list[Card]) -> dict[str, Card]:
+    """Map each Pokémon name to a single canonical printing (lowest card id)."""
+    by_name: dict[str, Card] = {}
+    for c in corpus:
+        if not c.is_pokemon:
+            continue
+        current = by_name.get(c.name)
+        if current is None or c.id < current.id:
+            by_name[c.name] = c
+    return by_name
+
+
+def _with_evolution_support(cards: list[Card], corpus: list[Card]) -> list[Card]:
+    """Return ``cards`` plus the pre-evolution chain of every evolution card.
+
+    For each Pokémon that evolves from something, we walk ``evolve_from`` down to
+    the Basic, pulling the relevant printings out of ``corpus`` (by name) and
+    appending any that are not already present. The walk continues through each
+    newly-added pre-evolution so multi-stage lines (Stage 2 -> Stage 1 -> Basic)
+    are fully resolved. Pre-evolutions are looked up regardless of type, so
+    off-type Basics that the energy filter removed are restored here.
+    """
+    by_name = _index_pokemon_by_name(corpus)
+    have_ids = {c.id for c in cards}
+    result = list(cards)
+    queue = list(cards)
+    while queue:
+        card = queue.pop()
+        if not (card.is_pokemon and card.evolve_from):
+            continue
+        pre = by_name.get(card.evolve_from)
+        if pre is not None and pre.id not in have_ids:
+            have_ids.add(pre.id)
+            result.append(pre)
+            queue.append(pre)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Deck validation - the safety net for "the LLM mostly got it right" cases.
 # ---------------------------------------------------------------------------
@@ -303,6 +356,34 @@ def validate_deck(deck: DeckPlan, by_id: dict[str, Card]) -> list[str]:
         if c.evolve_from and c.evolve_from not in names_in_deck:
             warnings.append(
                 f"{c.name} needs its pre-evolution {c.evolve_from!r} in the deck."
+            )
+
+    # Evolution-bottleneck warning: a pre-evolution feeds EVERY form that evolves
+    # from it, so those forms compete for the same limited pool. The combined
+    # copies of all cards sharing a pre-evolution can never exceed the copies of
+    # that pre-evolution in the deck - any surplus can never be put into play.
+    # e.g. 2 "Primarina ex" + 1 "Primarina" both evolve from Brionne; with only
+    # 2 Brionne, the 3rd Primarina is a dead card.
+    evolvers_by_pre: dict[str, list[str]] = {}
+    for c in pokemon_cards:
+        if c.evolve_from:
+            evolvers_by_pre.setdefault(c.evolve_from, [])
+            if c.name not in evolvers_by_pre[c.evolve_from]:
+                evolvers_by_pre[c.evolve_from].append(c.name)
+
+    for pre_name, form_names in evolvers_by_pre.items():
+        pre_count = by_name.get(pre_name, 0)
+        if pre_count == 0:
+            # Pre-evolution missing entirely - already covered by the line warning.
+            continue
+        demand = sum(by_name.get(form, 0) for form in form_names)
+        if demand > pre_count:
+            forms_desc = ", ".join(sorted(form_names))
+            warnings.append(
+                f"{forms_desc} total {demand} copies but only evolve from "
+                f"{pre_count} {pre_name}; at most {pre_count} can ever be played "
+                f"({demand - pre_count} dead). Trim the evolved forms or add more "
+                f"{pre_name}."
             )
 
     return warnings

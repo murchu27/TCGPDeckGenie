@@ -134,4 +134,30 @@ def fake_corpus() -> list[Card]:
             attacks=[Attack(name="Blizzard", cost=["Water", "Water", "Water"], damage="80")],
             abilities=[Ability(name="Frost Bind", effect="Once during your turn, may switch your active Pokémon.")],
         ),
+        # Off-type evolution line: Vaporeon (Water) evolves from Eevee, but Eevee
+        # is a Colorless Basic - so an `--energy Water` filter strips Eevee out of
+        # the pool, making the line impossible unless evolution-support re-adds it.
+        Card(
+            id="A1-206",
+            name="Eevee",
+            set_id="A1",
+            category="Pokemon",
+            hp=70,
+            types=["Colorless"],
+            stage="Basic",
+            retreat=1,
+            attacks=[Attack(name="Tackle", cost=["Colorless"], damage="20")],
+        ),
+        Card(
+            id="A1-080",
+            name="Vaporeon",
+            set_id="A1",
+            category="Pokemon",
+            hp=110,
+            types=["Water"],
+            stage="Stage1",
+            evolve_from="Eevee",
+            retreat=1,
+            attacks=[Attack(name="Bubble Drain", cost=["Water", "Water"], damage="60")],
+        ),
     ]
