@@ -69,6 +69,18 @@ class TCGPClient:
             raise RuntimeError(f"TCGdex returned no series for id={TCGP_SERIES_ID!r}")
         return [s.id for s in serie.sets]
 
+    def list_sets(self) -> list[tuple[str, str]]:
+        """Return ``(set_id, set_name)`` for every set in the TCG Pocket series.
+
+        The names match the human-readable expansion names (e.g. "Genetic Apex")
+        used elsewhere - notably the Bulbapedia solo-battle page titles - so this
+        is what the mission sync uses to build page titles and resolve cards.
+        """
+        serie = self._sdk.serie.getSync(TCGP_SERIES_ID)
+        if serie is None:
+            raise RuntimeError(f"TCGdex returned no series for id={TCGP_SERIES_ID!r}")
+        return [(s.id, s.name) for s in serie.sets]
+
     def list_card_ids_in_set(self, set_id: str) -> list[str]:
         """Return every card id that lives in ``set_id``."""
         set_obj = self._sdk.set.getSync(set_id)

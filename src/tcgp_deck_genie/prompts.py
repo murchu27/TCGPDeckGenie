@@ -90,6 +90,32 @@ When designing decks, optimise for:
 
 
 # ---------------------------------------------------------------------------
+# Counter block - extra guidance injected only when building against a known
+# opponent deck (counter mode).
+# ---------------------------------------------------------------------------
+
+COUNTER_BLOCK = """\
+You are building a deck to specifically BEAT the opponent deck described in
+`opponent`. That summary is pre-analysed for you:
+- `weakness_counts` shows how many of their Pokémon are weak to each type.
+  Attacking with the most-punishing type means many of their Pokémon take
+  bonus damage and fall a hit sooner - this is usually the strongest lever.
+- `main_attackers` lists their key threats (with hp, prize value `kopts`,
+  retreat, and attack costs/damage). Make sure your deck can survive or trade
+  favourably with these, and ideally KO them before they set up.
+- `tempo` tells you how slow they are: a deck leaning on Stage 2 lines can be
+  raced by faster, lower-to-the-ground attackers; `prize_liabilities` counts
+  their 2-3 prize Pokémon, which you want to target to win the prize race.
+Counter strategy guidance:
+- Exploit their weakness type, out-tempo slow setups, and dodge or punish their
+  main attackers' damage windows. Don't concede the prize race: avoid leaning on
+  fragile high-`kopts` Pokémon of your own unless you can protect them.
+- In `weaknesses`, be honest about how THIS counter deck could still lose to the
+  opponent (e.g. if they go fast / hit your weakness first).
+""".strip()
+
+
+# ---------------------------------------------------------------------------
 # Shortlist prompt - the cheap "narrow it down" pass.
 # ---------------------------------------------------------------------------
 
@@ -133,8 +159,8 @@ def shortlist_user_prompt(
 # ---------------------------------------------------------------------------
 
 
-def deck_system_prompt() -> str:
-    return (
+def deck_system_prompt(counter: bool = False) -> str:
+    base = (
         "You are an expert Pokémon TCG Pocket deck designer. You think carefully "
         "about how cards interact: ability + attack combos, supporter timing, "
         "switch and recovery options, evolution consistency, and the tempo of "
@@ -146,6 +172,9 @@ def deck_system_prompt() -> str:
         "(b) standalone utility - some cards earn their spot from raw power "
         "rather than combo potential, and you should call that out explicitly."
     )
+    if counter:
+        base += f"\n\n{COUNTER_BLOCK}"
+    return base
 
 
 def deck_user_prompt(
@@ -154,6 +183,7 @@ def deck_user_prompt(
     energy_type: str,
     candidates: Iterable[Card],
     must_include_ids: Iterable[str] | None = None,
+    opponent: dict | None = None,
 ) -> str:
     payload = {
         "energy_type": energy_type,
@@ -161,9 +191,17 @@ def deck_user_prompt(
         "must_include_card_ids": list(must_include_ids or []),
         "candidates": [c.compact_dict() for c in candidates],
     }
+    if opponent is not None:
+        payload["opponent"] = opponent
+    intro = (
+        "Design a 20-card Pokémon TCG Pocket deck to COUNTER the deck in "
+        "`opponent`, using ONLY the cards in `candidates`. "
+        if opponent is not None
+        else "Design a 20-card Pokémon TCG Pocket deck using ONLY the cards in "
+        "`candidates`. "
+    )
     return (
-        "Design a 20-card Pokémon TCG Pocket deck using ONLY the cards in "
-        "`candidates`. Honour `must_include_card_ids` if any are present.\n\n"
+        intro + "Honour `must_include_card_ids` if any are present.\n\n"
         "Hard requirements (a deck that breaks these is wrong):\n"
         f"- The `cards` list must sum to EXACTLY {DECK_SIZE} cards. Add up every "
         "entry's `count` and confirm the total before answering; do not under- or "

@@ -24,6 +24,7 @@ support).
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 
 from .gemini_client import GeminiClient
@@ -64,6 +65,11 @@ class BuildOptions:
     use_shortlist: bool = True
     thinking_budget: int | None = None
 
+    # Counter mode: a pre-digested summary of the opponent deck to beat (see
+    # ``summarise_opponent``). When set, the prompt switches into counter mode.
+    opponent: dict | None = None
+    opponent_label: str | None = None
+
 
 @dataclass
 class BuildResult:
@@ -74,6 +80,7 @@ class BuildResult:
     candidate_pool_size: int
     shortlist_size: int | None
     validation_warnings: list[str] = field(default_factory=list)
+    opponent_label: str | None = None
 
 
 class DeckBuildError(RuntimeError):
@@ -138,6 +145,7 @@ class DeckBuilder:
             candidate_pool_size=len(candidate_pool),
             shortlist_size=shortlisted_size,
             validation_warnings=warnings,
+            opponent_label=options.opponent_label,
         )
 
     # -- stages -------------------------------------------------------------------
@@ -194,17 +202,19 @@ class DeckBuilder:
         candidates: list[Card],
     ) -> DeckPlan:
         logger.info(
-            "Building deck from %d candidates via %s",
+            "Building deck from %d candidates via %s%s",
             len(candidates),
             self._gemini.config.reasoning_model,
+            " (counter mode)" if options.opponent else "",
         )
         return self._gemini.build_deck(
-            system_prompt=deck_system_prompt(),
+            system_prompt=deck_system_prompt(counter=options.opponent is not None),
             user_prompt=deck_user_prompt(
                 user_brief=options.user_brief,
                 energy_type=energy,
                 candidates=candidates,
                 must_include_ids=options.must_include_card_ids,
+                opponent=options.opponent,
             ),
             thinking_budget=options.thinking_budget,
         )
@@ -261,6 +271,105 @@ def _index_pokemon_by_name(corpus: list[Card]) -> dict[str, Card]:
         if current is None or c.id < current.id:
             by_name[c.name] = c
     return by_name
+
+
+# ---------------------------------------------------------------------------
+# Counter analysis - a local, free pre-digest of an opponent deck.
+# ---------------------------------------------------------------------------
+
+
+def _parse_damage(damage: str | None) -> int:
+    if not damage:
+        return 0
+    m = re.search(r"\d+", damage)
+    return int(m.group()) if m else 0
+
+
+def summarise_opponent(cards: list[Card], energy_types: list[str] | None = None) -> dict:
+    """Pre-digest an opponent deck into the tactical reads a counter needs.
+
+    We deliberately summarise rather than dump the raw deck into the prompt: it
+    keeps tokens low and front-loads the analysis (weakness coverage, prize
+    math, tempo) that the reasoning model would otherwise have to derive itself.
+    """
+    pokemon = [c for c in cards if c.is_pokemon]
+
+    # Weakness tally: how many of their Pokémon are weak to each type. The type
+    # vocabulary matches our energy types, so this directly tells us which
+    # attacking type punishes them the most.
+    weakness_counts: dict[str, int] = {}
+    for c in pokemon:
+        for w in c.weaknesses:
+            wtype = w.get("type") if isinstance(w, dict) else None
+            if wtype:
+                weakness_counts[wtype] = weakness_counts.get(wtype, 0) + 1
+
+    # Main attackers: the threats a counter actually has to answer. Rank by prize
+    # value then HP (the cards that both hit hard and cost you the most to trade).
+    # Dedupe by name so multiple copies of one threat don't crowd out the list.
+    seen_names: set[str] = set()
+    ranked: list[Card] = []
+    for c in sorted(pokemon, key=lambda c: (-c.ko_points, -(c.hp or 0), c.id)):
+        if c.name not in seen_names:
+            seen_names.add(c.name)
+            ranked.append(c)
+    main_attackers = [
+        {
+            "name": c.name,
+            "hp": c.hp,
+            "type": c.primary_type(),
+            "kopts": c.ko_points,
+            "retreat": c.retreat,
+            "attacks": [
+                {
+                    "cost": "".join(e[0] for e in a.cost) if a.cost else "",
+                    "dmg": _parse_damage(a.damage) or None,
+                }
+                for a in c.attacks
+            ],
+        }
+        for c in ranked[:5]
+    ]
+
+    stages = [c.stage for c in pokemon if c.stage]
+    tempo = {
+        "basics": sum(1 for c in pokemon if c.is_basic),
+        "evolutions": sum(1 for c in pokemon if c.evolve_from),
+        "has_stage2": "Stage2" in stages,
+        "prize_liabilities": sum(1 for c in pokemon if c.ko_points >= 2),
+    }
+
+    # Prefer explicitly-known energy (from the mission footer); fall back to the
+    # distinct primary types of their Pokémon.
+    if energy_types:
+        opp_energy = list(energy_types)
+    else:
+        opp_energy = []
+        for c in pokemon:
+            t = c.primary_type()
+            if t and t not in opp_energy:
+                opp_energy.append(t)
+
+    return {
+        "energy_types": opp_energy,
+        "main_attackers": main_attackers,
+        "weakness_counts": weakness_counts,
+        "tempo": tempo,
+    }
+
+
+def choose_counter_energy(opponent: dict) -> str | None:
+    """Pick the energy type that exploits the most opponent weaknesses.
+
+    Returns ``None`` when the opponent has no recorded weaknesses (the caller
+    should then ask the user to choose an energy explicitly).
+    """
+    counts: dict[str, int] = opponent.get("weakness_counts", {})
+    candidates = {t: n for t, n in counts.items() if t in ENERGY_TYPES}
+    if not candidates:
+        return None
+    # Highest weakness count wins; ties break by the canonical ENERGY_TYPES order.
+    return max(candidates, key=lambda t: (candidates[t], -ENERGY_TYPES.index(t)))
 
 
 def _with_evolution_support(cards: list[Card], corpus: list[Card]) -> list[Card]:

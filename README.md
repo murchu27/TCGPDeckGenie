@@ -40,6 +40,39 @@ tcgp-deck-genie build-deck \
 tcgp-deck-genie show-deck water_aggro.deck.json
 ```
 
+## Countering mission decks
+
+TCG Pocket's solo battles pit you against fixed AI decks. TCGPDeckGenie can fetch
+those decks and build a deck specifically to beat one:
+
+```bash
+# 1. Fetch the solo-battle (mission) opponent decks once (one-time, like `sync`).
+tcgp-deck-genie sync-missions
+
+# 2. Browse / search the mission decks locally (no API cost).
+tcgp-deck-genie missions --difficulty expert
+tcgp-deck-genie missions "Charizard ex and Moltres ex"   # show one in detail
+
+# 3. Build a counter. --energy is optional here: if omitted it is auto-picked
+#    from the type that exploits the most of the opponent's weaknesses.
+tcgp-deck-genie build-deck \
+    --counter-mission "Charizard ex and Moltres ex" \
+    --out anti_charizard.deck.json
+
+# You can also counter any deck you previously saved with --out:
+tcgp-deck-genie build-deck --counter-file water_aggro.deck.json
+```
+
+Before the LLM is involved, the opponent deck is digested locally into a compact
+summary (weakness tally, key threats with prize values, tempo profile). Only that
+summary - not the raw 20-card list - goes into the prompt, so countering costs the
+same 1-2 Gemini calls as a normal build.
+
+Mission data comes from [Bulbapedia](https://bulbapedia.bulbagarden.net)'s
+"List of &lt;expansion&gt; solo battles in Pokémon TCG Pocket" pages, fetched via the
+MediaWiki API and cached locally. Bulbapedia content is licensed
+[CC BY-NC-SA 2.5](https://creativecommons.org/licenses/by-nc-sa/2.5/).
+
 ## What you get back
 
 Each deck is a structured JSON object Gemini fills in against a Pydantic schema:
@@ -109,11 +142,12 @@ src/tcgp_deck_genie/
 ├── models.py         # Pydantic: Card, Attack, Ability, DeckEntry, DeckPlan
 ├── cache.py          # On-disk JSON cache for the TCGP corpus
 ├── tcgp_client.py    # TCGdex SDK wrapper: fetch, normalise, dedupe reprints
+├── missions.py       # Bulbapedia solo-battle decks: fetch, parse, resolve, cache
 ├── search.py         # Deterministic local filter + cheap candidate scoring
-├── prompts.py        # All Gemini prompts in one place (rules block + two templates)
+├── prompts.py        # All Gemini prompts in one place (rules + counter block + templates)
 ├── gemini_client.py  # google-genai wrapper: structured output + thinking budget + retries
-├── deck_builder.py   # Two-stage pipeline + deck validator
-└── cli.py            # Click CLI: sync, info, search, build-deck, show-deck
+├── deck_builder.py   # Two-stage pipeline + counter analysis + deck validator
+└── cli.py            # Click CLI: sync, sync-missions, info, search, missions, build-deck, show-deck
 ```
 
 The pipeline at runtime:
@@ -143,18 +177,22 @@ TCGdex SDK ──[ sync, once ]──▶ local JSON cache
 ## CLI reference
 
 ```text
-tcgp-deck-genie sync          # download the TCGP corpus (one-time, ~30-90 s)
-tcgp-deck-genie info          # print cache summary
-tcgp-deck-genie search        # filter the local corpus, no API cost
-tcgp-deck-genie build-deck    # produce a 20-card deck via Gemini
-tcgp-deck-genie show-deck     # re-render a saved deck, no API cost
+tcgp-deck-genie sync           # download the TCGP corpus (one-time, ~30-90 s)
+tcgp-deck-genie sync-missions  # download solo-battle opponent decks (one-time)
+tcgp-deck-genie info           # print cache summary
+tcgp-deck-genie search         # filter the local corpus, no API cost
+tcgp-deck-genie missions       # list/search/show solo-battle decks, no API cost
+tcgp-deck-genie build-deck     # produce a 20-card deck via Gemini
+tcgp-deck-genie show-deck      # re-render a saved deck, no API cost
 ```
 
 Run any subcommand with `--help` for its full option list. Key flags on `build-deck`:
 
 | Flag | Default | Notes |
 | --- | --- | --- |
-| `--energy` (required) | – | One of `Grass Fire Water Lightning Psychic Fighting Darkness Metal Dragon Colorless`. |
+| `--energy` | – | One of `Grass Fire Water Lightning Psychic Fighting Darkness Metal Dragon Colorless`. Required unless in counter mode (then auto-picked from opponent weaknesses if omitted). |
+| `--counter-mission` | – | Name of a cached solo-battle mission to counter. |
+| `--counter-file` | – | Path to a saved deck JSON (from `--out`) to counter. |
 | `--brief` | `"Build a strong, fun deck."` | Short free-text framing of the deck. |
 | `--set` (repeatable) | all TCGP sets | Restrict candidates to specific sets. |
 | `--keyword` (repeatable) | – | Substring(s) that must appear in card name/text. |

@@ -11,6 +11,8 @@ from tcgp_deck_genie.deck_builder import (
     BuildOptions,
     DeckBuilder,
     _with_evolution_support,
+    choose_counter_energy,
+    summarise_opponent,
     validate_deck,
 )
 from tcgp_deck_genie.gemini_client import GeminiConfig, ShortlistResponse
@@ -218,6 +220,8 @@ class _FakeGemini:
     shortlist_to_return: ShortlistResponse | None = None
     shortlist_calls: int = 0
     build_calls: int = 0
+    last_build_system_prompt: str | None = None
+    last_build_user_prompt: str | None = None
 
     def shortlist(self, *, system_prompt: str, user_prompt: str) -> ShortlistResponse:
         self.shortlist_calls += 1
@@ -231,6 +235,8 @@ class _FakeGemini:
         self, *, system_prompt: str, user_prompt: str, thinking_budget=None
     ) -> DeckPlan:
         self.build_calls += 1
+        self.last_build_system_prompt = system_prompt
+        self.last_build_user_prompt = user_prompt
         assert "expert Pokémon TCG Pocket deck designer" in system_prompt
         return self.deck_to_return
 
@@ -337,3 +343,67 @@ def test_builder_feeds_off_type_pre_evolutions_to_reasoning(fake_corpus):
     builder.build(BuildOptions(energy_type="Water"))
     assert "A1-080" in captured["candidate_ids"]  # Vaporeon, kept by the Water filter
     assert "A1-206" in captured["candidate_ids"]  # Eevee, restored despite being Colorless
+
+
+# ---------------------------------------------------------------------------
+# Counter analysis
+# ---------------------------------------------------------------------------
+
+
+def test_summarise_opponent_tallies_weaknesses(fake_corpus):
+    by_id = {c.id: c for c in fake_corpus}
+    # Articuno ex (A1-101) has a Lightning weakness in the fixture.
+    opp = summarise_opponent([by_id["A1-101"], by_id["A1-079"]])
+    # Whatever the fixture weaknesses are, the summary must be well-formed.
+    assert "weakness_counts" in opp
+    assert "main_attackers" in opp
+    assert "tempo" in opp
+    # ex attacker should be ranked first (highest kopts).
+    assert opp["main_attackers"][0]["kopts"] == 2
+
+
+def test_summarise_opponent_dedupes_attackers(fake_corpus):
+    by_id = {c.id: c for c in fake_corpus}
+    lapras = by_id["A1-079"]
+    opp = summarise_opponent([lapras, lapras, lapras])
+    names = [a["name"] for a in opp["main_attackers"]]
+    assert names.count("Lapras") == 1
+
+
+def test_summarise_opponent_prefers_explicit_energy(fake_corpus):
+    by_id = {c.id: c for c in fake_corpus}
+    opp = summarise_opponent([by_id["A1-079"]], energy_types=["Water", "Lightning"])
+    assert opp["energy_types"] == ["Water", "Lightning"]
+
+
+def test_choose_counter_energy_picks_top_weakness():
+    opp = {"weakness_counts": {"Lightning": 3, "Fire": 1}}
+    assert choose_counter_energy(opp) == "Lightning"
+
+
+def test_choose_counter_energy_none_when_no_weaknesses():
+    assert choose_counter_energy({"weakness_counts": {}}) is None
+    assert choose_counter_energy({}) is None
+
+
+def test_builder_counter_mode_injects_opponent_and_block(fake_corpus):
+    gemini = _FakeGemini(
+        config=GeminiConfig(api_key="fake", shortlist_model=None),
+        deck_to_return=_make_valid_deck(),
+    )
+    builder = DeckBuilder(fake_corpus, gemini)
+    opponent = summarise_opponent(
+        [c for c in fake_corpus if c.id == "A1-094"], energy_types=["Lightning"]
+    )
+    result = builder.build(
+        BuildOptions(
+            energy_type="Fighting",
+            opponent=opponent,
+            opponent_label="Pikachu Test Deck",
+        )
+    )
+    # The counter guidance and opponent payload must reach Gemini.
+    assert "BEAT the opponent deck" in gemini.last_build_system_prompt
+    assert "weakness_counts" in gemini.last_build_user_prompt
+    assert "opponent" in gemini.last_build_user_prompt
+    assert result.opponent_label == "Pikachu Test Deck"

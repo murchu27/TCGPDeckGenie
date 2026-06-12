@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from tcgp_deck_genie.prompts import (
+    COUNTER_BLOCK,
     DECK_SIZE,
     MAX_COPIES_PER_NAME,
     POCKET_RULES_BLOCK,
@@ -48,3 +49,32 @@ def test_deck_user_prompt_includes_must_includes(fake_corpus):
 def test_system_prompts_share_rules_block():
     assert POCKET_RULES_BLOCK in shortlist_system_prompt()
     assert POCKET_RULES_BLOCK in deck_system_prompt()
+
+
+def test_counter_block_only_in_counter_mode():
+    assert COUNTER_BLOCK not in deck_system_prompt()
+    assert COUNTER_BLOCK not in deck_system_prompt(counter=False)
+    assert COUNTER_BLOCK in deck_system_prompt(counter=True)
+
+
+def test_deck_user_prompt_includes_opponent_payload(fake_corpus):
+    opponent = {"energy_types": ["Lightning"], "weakness_counts": {"Fighting": 2}}
+    prompt = deck_user_prompt(
+        user_brief="counter it",
+        energy_type="Fighting",
+        candidates=fake_corpus,
+        opponent=opponent,
+    )
+    assert "COUNTER the deck" in prompt
+    payload = prompt.split("```json", 1)[1].rsplit("```", 1)[0]
+    decoded = json.loads(payload)
+    assert decoded["opponent"]["weakness_counts"] == {"Fighting": 2}
+
+
+def test_deck_user_prompt_omits_opponent_when_absent(fake_corpus):
+    prompt = deck_user_prompt(
+        user_brief="normal", energy_type="Water", candidates=fake_corpus
+    )
+    payload = prompt.split("```json", 1)[1].rsplit("```", 1)[0]
+    decoded = json.loads(payload)
+    assert "opponent" not in decoded

@@ -22,8 +22,26 @@ from rich.table import Table
 
 from . import __version__
 from .cache import Corpus, corpus_info, default_cache_dir, load_corpus, save_corpus
-from .deck_builder import BuildOptions, BuildResult, DeckBuilder, DeckBuildError
+from .deck_builder import (
+    BuildOptions,
+    BuildResult,
+    DeckBuilder,
+    DeckBuildError,
+    choose_counter_energy,
+    summarise_opponent,
+)
 from .gemini_client import GeminiClient, GeminiClientError
+from .missions import (
+    SET_NAME_ALIASES,
+    BulbapediaClient,
+    MissionCorpus,
+    MissionDeck,
+    MissionFetchProgress,
+    MissionLookupError,
+    find_mission,
+    load_missions,
+    save_missions,
+)
 from .models import ENERGY_TYPES, Card, DeckPlan
 from .search import SearchFilter, apply_filter
 from .tcgp_client import FetchProgress, TCGPClient
@@ -174,6 +192,145 @@ def info(ctx: click.Context) -> None:
 
 
 # ---------------------------------------------------------------------------
+# sync-missions
+# ---------------------------------------------------------------------------
+
+
+@main.command("sync-missions")
+@click.option(
+    "--set",
+    "set_ids",
+    multiple=True,
+    help="Fetch only specific TCGP set ids (defaults to all expansions). Repeatable.",
+)
+@click.pass_context
+def sync_missions(ctx: click.Context, set_ids: tuple[str, ...]) -> None:
+    """Fetch solo-battle (mission) opponent decks from Bulbapedia into the cache.
+
+    Like 'sync', this is a one-time network step; reuse the cache afterwards.
+    Requires the card corpus ('sync') first, which it uses to resolve card ids.
+    """
+    cache_dir: Path = ctx.obj["cache_dir"]
+    corpus = _load_or_fail(ctx)
+
+    client = TCGPClient()
+    all_sets = client.list_sets()  # [(id, name)] from TCGdex
+    name_to_id = {name: sid for sid, name in all_sets}
+    name_to_id.update(SET_NAME_ALIASES)
+    valid_ids = {c.id for c in corpus.cards}
+
+    # The promo set (P-A) has no solo-battle page of its own; skip it as a target
+    # while still keeping it in name_to_id so promo cards inside decks resolve.
+    targets = [
+        (sid, name)
+        for sid, name in all_sets
+        if sid != "P-A" and (not set_ids or sid in set_ids)
+    ]
+    if not targets:
+        console.print("[yellow]No matching expansions to fetch.[/]")
+        raise SystemExit(1)
+
+    console.print(f"[bold]Fetching solo battles for {len(targets)} expansion(s)…[/]")
+    bulba = BulbapediaClient(name_to_id, valid_ids)
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold]{task.description}[/]"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task_id = progress.add_task("Expansions", total=len(targets))
+
+        def cb(p: MissionFetchProgress, _task=task_id) -> None:
+            progress.update(_task, total=p.total, completed=p.completed, description=p.set_name)
+
+        decks, skipped = bulba.fetch_mission_decks(targets, progress=cb)
+
+    corpus_obj = MissionCorpus(
+        decks=decks,
+        sets_included=[sid for sid, name in targets if name not in skipped],
+        fetched_at=time.time(),
+    )
+    out = save_missions(corpus_obj, cache_dir=cache_dir)
+
+    unresolved = sum(len(d.unresolved) for d in decks)
+    console.print(f"[green]✓[/] Saved {len(decks)} mission deck(s) to [bold]{out}[/]")
+    if skipped:
+        console.print(
+            f"[dim]No solo-battle page yet for: {', '.join(skipped)} (skipped).[/]"
+        )
+    if unresolved:
+        console.print(
+            f"[dim]{unresolved} card reference(s) could not be resolved to the "
+            "current corpus (likely excluded rarities or un-synced sets).[/]"
+        )
+
+
+# ---------------------------------------------------------------------------
+# missions
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.option("--set", "set_id", default=None, help="Filter to a single set id.")
+@click.option("--difficulty", default=None, help="Filter by difficulty (substring match).")
+@click.argument("query", nargs=-1)
+@click.pass_context
+def missions(
+    ctx: click.Context,
+    set_id: str | None,
+    difficulty: str | None,
+    query: tuple[str, ...],
+) -> None:
+    """List solo-battle opponent decks, or show one in detail by name.
+
+    With no NAME, lists matching missions. With a NAME, resolves it (fuzzily)
+    and prints the full opposing deck.
+    """
+    corpus = _load_or_fail(ctx)
+    mission_corpus = _load_missions_or_fail(ctx)
+    by_id = {c.id: c for c in corpus.cards}
+
+    if query:
+        name = " ".join(query)
+        try:
+            deck = find_mission(
+                mission_corpus.decks, name, set_id=set_id, difficulty=difficulty
+            )
+        except MissionLookupError as exc:
+            console.print(f"[red]{exc}[/]")
+            raise SystemExit(2) from exc
+        _print_mission(deck, by_id)
+        return
+
+    decks = mission_corpus.decks
+    if set_id:
+        decks = [d for d in decks if d.set_id == set_id]
+    if difficulty:
+        dl = difficulty.lower()
+        decks = [d for d in decks if d.difficulty and dl in d.difficulty.lower()]
+
+    console.print(f"[bold]{len(decks)}[/] mission(s)")
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Name")
+    table.add_column("Set")
+    table.add_column("Difficulty")
+    table.add_column("Cards", justify="right")
+    table.add_column("Energy")
+    for d in sorted(decks, key=lambda d: (d.set_id or "", d.difficulty or "", d.name)):
+        table.add_row(
+            d.name,
+            d.set_id or "",
+            d.difficulty or "",
+            str(d.total_cards),
+            ", ".join(d.energy_types) or "—",
+        )
+    console.print(table)
+
+
+# ---------------------------------------------------------------------------
 # search
 # ---------------------------------------------------------------------------
 
@@ -261,12 +418,30 @@ def _summarise_attacks(card: Card) -> str:
 
 
 @main.command("build-deck")
-@click.option("--energy", required=True, help=f"Single energy type: {', '.join(ENERGY_TYPES)}.")
+@click.option(
+    "--energy",
+    default=None,
+    help=(
+        f"Single energy type: {', '.join(ENERGY_TYPES)}. "
+        "Optional in counter mode (auto-picked from opponent weaknesses)."
+    ),
+)
 @click.option(
     "--brief",
     default="Build a strong, fun deck.",
     show_default=True,
     help="Short brief that frames what kind of deck you want.",
+)
+@click.option(
+    "--counter-mission",
+    default=None,
+    help="Name of a cached solo-battle mission whose opponent deck to counter.",
+)
+@click.option(
+    "--counter-file",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to a saved deck JSON (from --out) to build a counter against.",
 )
 @click.option("--set", "set_ids", multiple=True, help="Limit candidate pool to these sets.")
 @click.option(
@@ -314,8 +489,10 @@ def _summarise_attacks(card: Card) -> str:
 @click.pass_context
 def build_deck_cmd(
     ctx: click.Context,
-    energy: str,
+    energy: str | None,
     brief: str,
+    counter_mission: str | None,
+    counter_file: Path | None,
     set_ids: tuple[str, ...],
     keywords: tuple[str, ...],
     must_include: tuple[str, ...],
@@ -326,8 +503,46 @@ def build_deck_cmd(
     thinking_budget: int | None,
     out: Path | None,
 ) -> None:
-    """Ask Gemini to design a 20-card TCG Pocket deck."""
+    """Ask Gemini to design a 20-card TCG Pocket deck.
+
+    In counter mode (--counter-mission or --counter-file) the deck is built to
+    beat a specific opponent; --energy then becomes optional and is auto-picked
+    from the opponent's weaknesses when omitted.
+    """
     corpus = _load_or_fail(ctx)
+    by_id = {c.id: c for c in corpus.cards}
+
+    if counter_mission and counter_file:
+        console.print("[red]Use only one of --counter-mission / --counter-file.[/]")
+        raise SystemExit(2)
+
+    opponent_summary: dict | None = None
+    opponent_label: str | None = None
+    counter_brief = brief
+    if counter_mission or counter_file:
+        opponent_cards, opponent_energy, opponent_label = _resolve_opponent(
+            ctx, by_id, counter_mission, counter_file
+        )
+        opponent_summary = summarise_opponent(opponent_cards, opponent_energy)
+        if not energy:
+            energy = choose_counter_energy(opponent_summary)
+            if not energy:
+                console.print(
+                    "[red]Could not auto-pick an energy type (opponent has no "
+                    "recorded weaknesses). Re-run with --energy.[/]"
+                )
+                raise SystemExit(2)
+            console.print(
+                f"[dim]Auto-selected [bold]{energy}[/] energy "
+                f"(exploits the most opponent weaknesses).[/]"
+            )
+        if brief == "Build a strong, fun deck.":
+            counter_brief = f"Build a deck to beat the {opponent_label} deck."
+    elif not energy:
+        console.print(
+            "[red]--energy is required unless you pass --counter-mission/--counter-file.[/]"
+        )
+        raise SystemExit(2)
 
     try:
         gemini = GeminiClient()
@@ -338,7 +553,7 @@ def build_deck_cmd(
     builder = DeckBuilder(corpus.cards, gemini)
     options = BuildOptions(
         energy_type=energy,
-        user_brief=brief,
+        user_brief=counter_brief,
         set_ids=set(set_ids) if set_ids else None,
         keywords=list(keywords),
         must_include_card_ids=list(must_include),
@@ -347,11 +562,16 @@ def build_deck_cmd(
         shortlist_size=shortlist_size,
         preshortlist_cap=candidate_cap,
         thinking_budget=thinking_budget,
+        opponent=opponent_summary,
+        opponent_label=opponent_label,
     )
 
-    with console.status(
-        f"[bold]Designing {energy.capitalize()} deck…[/]", spinner="dots"
-    ):
+    status = (
+        f"[bold]Designing {energy.capitalize()} counter to {opponent_label}…[/]"
+        if opponent_label
+        else f"[bold]Designing {energy.capitalize()} deck…[/]"
+    )
+    with console.status(status, spinner="dots"):
         try:
             result = builder.build(options)
         except (DeckBuildError, GeminiClientError) as exc:
@@ -364,6 +584,34 @@ def build_deck_cmd(
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(_deck_to_json(result), ensure_ascii=False, indent=2))
         console.print(f"[green]✓[/] Saved deck to [bold]{out}[/]")
+
+
+def _resolve_opponent(
+    ctx: click.Context,
+    by_id: dict[str, Card],
+    counter_mission: str | None,
+    counter_file: Path | None,
+) -> tuple[list[Card], list[str], str]:
+    """Resolve the opponent deck into (cards, energy_types, label)."""
+    if counter_mission:
+        mission_corpus = _load_missions_or_fail(ctx)
+        try:
+            deck = find_mission(mission_corpus.decks, counter_mission)
+        except MissionLookupError as exc:
+            console.print(f"[red]{exc}[/]")
+            raise SystemExit(2) from exc
+        cards = [by_id[cid] for cid in deck.resolved_card_ids() if cid in by_id]
+        return cards, deck.energy_types, deck.name
+
+    # counter_file: a saved deck JSON produced by --out.
+    payload = json.loads(Path(counter_file).read_text())
+    deck_obj = DeckPlan.model_validate(payload["deck"])
+    cards: list[Card] = []
+    for entry in deck_obj.cards:
+        card = by_id.get(entry.card_id)
+        if card is not None:
+            cards.extend([card] * entry.count)
+    return cards, list(deck_obj.energy_types), deck_obj.name
 
 
 # ---------------------------------------------------------------------------
@@ -388,6 +636,7 @@ def show_deck_cmd(ctx: click.Context, path: Path) -> None:
         candidate_pool_size=int(payload.get("candidate_pool_size", 0)),
         shortlist_size=payload.get("shortlist_size"),
         validation_warnings=list(warnings),
+        opponent_label=payload.get("opponent_label"),
     )
     _print_deck(result)
 
@@ -409,9 +658,49 @@ def _load_or_fail(ctx: click.Context):
     return corpus
 
 
+def _load_missions_or_fail(ctx: click.Context) -> MissionCorpus:
+    cache_dir = ctx.obj["cache_dir"]
+    mc = load_missions(cache_dir)
+    if mc is None:
+        console.print(
+            f"[yellow]No mission cache found at {cache_dir / 'missions_tcgp.json'}[/].\n"
+            "Run [bold]tcgp-deck-genie sync-missions[/] first."
+        )
+        sys.exit(1)
+    return mc
+
+
+def _print_mission(deck: MissionDeck, by_id: dict[str, Card]) -> None:
+    console.rule(
+        f"[bold magenta]{deck.name}[/] · {deck.set_id or '?'} · "
+        f"{deck.difficulty or '?'} · {deck.total_cards} cards"
+    )
+    if deck.energy_types:
+        console.print(f"[dim]Energy: {', '.join(deck.energy_types)}[/]\n")
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Count", justify="right")
+    table.add_column("ID")
+    table.add_column("Name")
+    table.add_column("Type")
+    for c in deck.cards:
+        card = by_id.get(c.card_id) if c.card_id else None
+        cid = c.card_id or "[red]unresolved[/]"
+        ctype = (card.primary_type() or "") if card else ""
+        suffix = " [ex]" if card and card.is_ex else ""
+        table.add_row(str(c.count), cid, c.name + suffix, ctype)
+    console.print(table)
+    if deck.unresolved:
+        console.print(
+            f"\n[dim]{len(deck.unresolved)} unresolved card(s): "
+            f"{', '.join(deck.unresolved)}[/]"
+        )
+
+
 def _print_deck(result: BuildResult) -> None:
     deck = result.deck
     console.rule(f"[bold cyan]{deck.name}[/] · {', '.join(deck.energy_types)} · {deck.total_cards} cards")
+    if result.opponent_label:
+        console.print(f"[magenta]Counter to:[/] {result.opponent_label}")
     console.print(f"[italic]{deck.strategy}[/]\n")
 
     table = Table(show_header=True, header_style="bold")
@@ -456,6 +745,7 @@ def _deck_to_json(result: BuildResult) -> dict:
         "candidate_pool_size": result.candidate_pool_size,
         "shortlist_size": result.shortlist_size,
         "validation_warnings": list(result.validation_warnings),
+        "opponent_label": result.opponent_label,
     }
 
 
