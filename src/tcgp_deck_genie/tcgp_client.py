@@ -33,6 +33,13 @@ TCGP_SERIES_ID = "tcgp"
 # want to look like an abusive client.
 DEFAULT_FETCH_CONCURRENCY = 12
 
+# Rarity tiers we treat as "out of reach" for a typical TCG Pocket player.
+# TCGdex returns rarity as a human-readable string like "Four Diamond", "Two
+# Star", "One Shiny", "Crown Rare". We match by substring (case-insensitive),
+# which is enough to catch every rare tier while leaving Diamonds, Promos, and
+# unrated cards alone.
+RARE_RARITY_KEYWORDS: tuple[str, ...] = ("Star", "Shiny", "Crown")
+
 
 @dataclass
 class FetchProgress:
@@ -75,14 +82,35 @@ class TCGPClient:
         self,
         set_ids: Iterable[str] | None = None,
         progress: ProgressCallback = None,
+        exclude_rares: bool = True,
     ) -> list[Card]:
-        """Fetch and normalise every card in the given sets (defaults to all TCGP sets)."""
+        """Fetch and normalise every card in the given sets (defaults to all TCGP sets).
+
+        When ``exclude_rares`` is true (the default), printings whose rarity
+        contains "Star", "Shiny", or "Crown" are dropped before the dedupe step.
+        These tiers are extremely hard to obtain in TCG Pocket, so a deck that
+        relies on one would be frustrating to actually build in-game. Most of
+        these rares are reprints of cards that also exist at Diamond rarity and
+        would already be dropped by the dedupe pass, but some unique rares
+        otherwise slip through; the explicit filter catches those too.
+
+        Set ``exclude_rares=False`` if the caller knows they have access to the
+        rares in question and wants them considered for decks.
+        """
         set_ids = list(set_ids) if set_ids is not None else self.list_set_ids()
 
         all_cards: list[Card] = []
         for set_id in set_ids:
             card_ids = self.list_card_ids_in_set(set_id)
             fetched = self._fetch_card_details_concurrent(set_id, card_ids, progress)
+            if exclude_rares:
+                before = len(fetched)
+                fetched = [c for c in fetched if not _is_rare(c)]
+                logger.debug(
+                    "Set %s: filtered out %d rare printing(s) (Star/Shiny/Crown).",
+                    set_id,
+                    before - len(fetched),
+                )
             all_cards.extend(_dedupe(fetched))
         return all_cards
 
@@ -205,6 +233,21 @@ def _to_str_or_none(v) -> str | None:
         return None
     s = str(v).strip()
     return s or None
+
+
+def _is_rare(card: Card) -> bool:
+    """True if this card's rarity contains a high-rarity keyword.
+
+    TCG Pocket's rarity tiers are (roughly, ordered cheapest → rarest):
+    One-/Two-/Three-/Four-Diamond → One-/Two-/Three-Star → Shiny → Crown Rare.
+    We treat everything from Star up as "rare". Cards with no rarity string
+    (typically Promos that haven't been categorised yet) are kept by default
+    so we don't accidentally drop obtainable promos.
+    """
+    if not card.rarity:
+        return False
+    rarity_lower = card.rarity.lower()
+    return any(kw.lower() in rarity_lower for kw in RARE_RARITY_KEYWORDS)
 
 
 def _dedupe(cards: list[Card]) -> list[Card]:

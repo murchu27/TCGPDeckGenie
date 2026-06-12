@@ -74,8 +74,24 @@ def main(ctx: click.Context, verbose: bool, cache_dir: Path | None) -> None:
 @click.option(
     "--concurrency", default=12, show_default=True, help="Parallel TCGdex requests."
 )
+@click.option(
+    "--exclude-rares/--include-rares",
+    "exclude_rares",
+    default=True,
+    show_default=True,
+    help=(
+        "Drop high-rarity printings (Star/Shiny/Crown) from the cached corpus. "
+        "These are very hard to obtain in TCG Pocket, so the default is to "
+        "exclude them. Use --include-rares only if you have the relevant rares."
+    ),
+)
 @click.pass_context
-def sync(ctx: click.Context, set_ids: tuple[str, ...], concurrency: int) -> None:
+def sync(
+    ctx: click.Context,
+    set_ids: tuple[str, ...],
+    concurrency: int,
+    exclude_rares: bool,
+) -> None:
     """Fetch the TCG Pocket card corpus from TCGdex into the local cache.
 
     This is the only step that talks to TCGdex. Run it once after install,
@@ -85,7 +101,14 @@ def sync(ctx: click.Context, set_ids: tuple[str, ...], concurrency: int) -> None
     client = TCGPClient(concurrency=concurrency)
 
     sets = list(set_ids) if set_ids else client.list_set_ids()
-    console.print(f"[bold]Syncing {len(sets)} set(s):[/] {', '.join(sets)}")
+    mode = (
+        "excluding Star/Shiny/Crown rares"
+        if exclude_rares
+        else "including every rarity"
+    )
+    console.print(
+        f"[bold]Syncing {len(sets)} set(s)[/] ({mode}): {', '.join(sets)}"
+    )
 
     all_cards: list[Card] = []
     with Progress(
@@ -102,7 +125,9 @@ def sync(ctx: click.Context, set_ids: tuple[str, ...], concurrency: int) -> None
             def cb(p: FetchProgress, _task=task_id) -> None:
                 progress.update(_task, total=p.total, completed=p.completed)
 
-            cards = client.fetch_cards(set_ids=[set_id], progress=cb)
+            cards = client.fetch_cards(
+                set_ids=[set_id], progress=cb, exclude_rares=exclude_rares
+            )
             all_cards.extend(cards)
             progress.update(task_id, description=f"Set {set_id} ({len(cards)} cards)")
 

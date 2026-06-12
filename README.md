@@ -23,6 +23,8 @@ cp .env.example .env
 # Paste a free key from https://aistudio.google.com/apikey into GEMINI_API_KEY
 
 # 1. Fetch the TCGP card corpus once (writes ~3 MB to ~/.tcgp_deck_genie/).
+#    Star / Shiny / Crown rares are filtered out by default; pass --include-rares
+#    if you have access to them and want them in the candidate pool.
 tcgp-deck-genie sync
 
 # 2. Browse cards locally - zero API calls, zero cost.
@@ -78,6 +80,7 @@ This is a portfolio project, so **cost-awareness is a core design constraint**, 
 | Concern | Design choice | Effect |
 | --- | --- | --- |
 | Avoid redundant TCGdex traffic | A one-shot `sync` command writes the whole TCGP corpus to a local JSON cache. | Subsequent runs make **zero** TCGdex calls. |
+| Don't recommend cards the user can't realistically obtain | `sync` filters out Star / Shiny / Crown rarities by default (toggle with `--include-rares`). | The candidate pool only contains cards the player can plausibly own. |
 | Avoid stuffing 2,000 cards into every prompt | A deterministic local filter (energy type, set, keywords, retreat cost, ex toggle) narrows the corpus to ~100-250 candidates *before* any LLM call. | The reasoning model only ever sees a few-hundred-card payload, not the whole catalogue. |
 | Avoid sending verbose JSON | A `Card.compact_dict()` projection drops illustrator / image / pricing / variant fields and abbreviates attack costs (`"WWC"` instead of `["Water","Water","Colorless"]`). | A typical card serialises in ~150 tokens instead of ~500. |
 | Reduce reasoning-model tokens | A cheap **shortlist pass** (default `gemini-2.5-flash-lite`, thinking disabled) picks the ~40 most promising candidates first. The expensive reasoning pass (`gemini-2.5-flash` with a 2k thinking budget) then sees only that subset. | The pricey call's input shrinks ~3-5×; the shortlist call is small enough to be free-tier-friendly. |
