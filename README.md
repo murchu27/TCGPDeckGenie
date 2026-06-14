@@ -3,7 +3,7 @@
 
 # TCGPDeckGenie
 
-A small portfolio-grade Python application that designs **Pokémon TCG Pocket** decks by combining:
+A small CLI-based Python application that designs **Pokémon TCG Pocket** decks by combining:
 
 * The [**TCGdex** Python SDK](https://pypi.org/project/tcgdex-sdk/) for the card data, and
 * **Google Gemini** (free tier) for the reasoning - explicitly weighing *card synergy* against *raw standalone utility*, the two ways a card earns its slot in a 20-card deck.
@@ -231,4 +231,4 @@ Pokémon TCG Pocket has tight format constraints (20 cards, 1-3 energy types, no
 
 ## License
 
-GPL v3.
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
