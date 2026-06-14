@@ -24,7 +24,6 @@ support).
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
 
 from .gemini_client import GeminiClient
@@ -278,13 +277,6 @@ def _index_pokemon_by_name(corpus: list[Card]) -> dict[str, Card]:
 # ---------------------------------------------------------------------------
 
 
-def _parse_damage(damage: str | None) -> int:
-    if not damage:
-        return 0
-    m = re.search(r"\d+", damage)
-    return int(m.group()) if m else 0
-
-
 def summarise_opponent(cards: list[Card], energy_types: list[str] | None = None) -> dict:
     """Pre-digest an opponent deck into the tactical reads a counter needs.
 
@@ -323,7 +315,7 @@ def summarise_opponent(cards: list[Card], energy_types: list[str] | None = None)
             "attacks": [
                 {
                     "cost": "".join(e[0] for e in a.cost) if a.cost else "",
-                    "dmg": _parse_damage(a.damage) or None,
+                    "dmg": a.parsed_damage or None,
                 }
                 for a in c.attacks
             ],

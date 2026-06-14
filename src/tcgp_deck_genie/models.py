@@ -12,6 +12,7 @@ Two layers:
 """
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -47,6 +48,14 @@ class Attack(BaseModel):
     @property
     def energy_cost_total(self) -> int:
         return len(self.cost)
+
+    @property
+    def parsed_damage(self) -> int:
+        """First integer in the damage string (e.g. ``'80+'`` → 80), or 0."""
+        if not self.damage:
+            return 0
+        m = re.search(r"\d+", self.damage)
+        return int(m.group()) if m else 0
 
 
 class Ability(BaseModel):
