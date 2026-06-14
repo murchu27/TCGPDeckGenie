@@ -72,8 +72,7 @@ same 1-2 Gemini calls as a normal build.
 
 Mission data comes from [Bulbapedia](https://bulbapedia.bulbagarden.net)'s
 "List of &lt;expansion&gt; solo battles in Pokémon TCG Pocket" pages, fetched via the
-MediaWiki API and cached locally. Bulbapedia content is licensed
-[CC BY-NC-SA 2.5](https://creativecommons.org/licenses/by-nc-sa/2.5/).
+MediaWiki API and cached locally.
 
 ### Opponent deck JSON (`--counter-file`)
 
@@ -232,3 +231,7 @@ Pokémon TCG Pocket has tight format constraints (20 cards, 1-3 energy types, no
 ## License
 
 This project is licensed under the [GNU General Public License v3.0](LICENSE).
+
+- Use of the TCGdex SDK is licensed under [MIT](https://github.com/tcgdex/cards-database/blob/master/LICENSE).
+- Use of Bulbapedia content is licensed under [CC BY-NC-SA 2.5](https://creativecommons.org/licenses/by-nc-sa/2.5/); this project is non-commerical.
+- This project is not produced, endorsed, supported or affiliated with Nintendo or The Pokémon Company.
