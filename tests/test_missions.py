@@ -11,6 +11,7 @@ from tcgp_deck_genie.missions import (
     _resolve_card_id,
     find_mission,
     load_missions,
+    missions_info,
     parse_mission_page,
     save_missions,
 )
@@ -187,6 +188,20 @@ def test_save_and_load_round_trip(tmp_path):
 
 def test_load_missing_returns_none(tmp_path):
     assert load_missions(cache_dir=tmp_path) is None
+
+
+def test_missions_info_summary(tmp_path):
+    decks = parse_mission_page(
+        WIKITEXT, set_name="Genetic Apex", set_id="A1",
+        name_to_id=NAME_TO_ID, valid_ids=VALID_IDS,
+    )
+    corpus = MissionCorpus(decks=decks, sets_included=["A1"], fetched_at=123.0)
+    save_missions(corpus, cache_dir=tmp_path)
+    summary = missions_info(cache_dir=tmp_path)
+    assert summary is not None
+    assert summary["deck_count"] == len(decks)
+    assert summary["sets_included"] == ["A1"]
+    assert summary["fetched_at"] == 123.0
 
 
 def test_mission_card_model_defaults():
