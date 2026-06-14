@@ -43,7 +43,7 @@ from .missions import (
     load_missions,
     save_missions,
 )
-from .models import ENERGY_TYPES, Card, DeckPlan, DeckEntry, OpponentDeckSpec
+from .models import ENERGY_TYPES, Card, DeckEntry, DeckPlan, OpponentDeckSpec
 from .search import SearchFilter, apply_filter
 from .tcgp_client import FetchProgress, TCGPClient
 
