@@ -156,16 +156,9 @@ def candidate_score(card: Card) -> float:
     if card.abilities:
         score += 1.5 * len(card.abilities)
     if card.attacks:
-        best_dmg = max((_parse_damage(a.damage) for a in card.attacks), default=0)
+        best_dmg = max((a.parsed_damage for a in card.attacks), default=0)
         score += best_dmg / 50.0
     return score
-
-
-def _parse_damage(d: str | None) -> int:
-    if not d:
-        return 0
-    m = re.search(r"\d+", d)
-    return int(m.group()) if m else 0
 
 
 def top_candidates(cards: list[Card], limit: int) -> list[Card]:

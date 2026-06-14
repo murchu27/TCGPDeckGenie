@@ -22,7 +22,7 @@ from rich.progress import (
 from rich.table import Table
 
 from . import __version__
-from .cache import Corpus, corpus_info, default_cache_dir, load_corpus, save_corpus
+from .cache import Corpus, corpus_info, corpus_path, default_cache_dir, load_corpus, save_corpus
 from .deck_builder import (
     BuildOptions,
     BuildResult,
@@ -41,6 +41,8 @@ from .missions import (
     MissionLookupError,
     find_mission,
     load_missions,
+    missions_info,
+    missions_path,
     save_missions,
 )
 from .models import ENERGY_TYPES, Card, DeckEntry, DeckPlan, OpponentDeckSpec
@@ -168,21 +170,10 @@ def sync(
 # ---------------------------------------------------------------------------
 
 
-@main.command()
-@click.pass_context
-def info(ctx: click.Context) -> None:
-    """Show what's in the local cache."""
-    cache_dir: Path = ctx.obj["cache_dir"]
-    summary = corpus_info(cache_dir)
-    if summary is None:
-        console.print(
-            f"[yellow]No cache found at {cache_dir / 'cards_tcgp.json'}[/].\n"
-            "Run [bold]tcgp-deck-genie sync[/] first."
-        )
-        raise SystemExit(1)
-    table = Table(title="Cache summary", show_header=False)
+def _print_cache_section(title: str, summary: dict, count_label: str, count_key: str) -> None:
+    table = Table(title=title, show_header=False)
     table.add_row("Path", str(summary["path"]))
-    table.add_row("Cards", str(summary["card_count"]))
+    table.add_row(count_label, str(summary[count_key]))
     table.add_row("Sets", ", ".join(summary["sets_included"]))
     table.add_row(
         "Fetched at",
@@ -190,6 +181,36 @@ def info(ctx: click.Context) -> None:
     )
     table.add_row("Schema version", str(summary["schema_version"]))
     console.print(table)
+
+
+@main.command()
+@click.pass_context
+def info(ctx: click.Context) -> None:
+    """Show what's in the local card and mission caches."""
+    cache_dir: Path = ctx.obj["cache_dir"]
+    card_summary = corpus_info(cache_dir)
+    mission_summary = missions_info(cache_dir)
+
+    if card_summary:
+        _print_cache_section("Card corpus", card_summary, "Cards", "card_count")
+    else:
+        console.print(
+            f"[yellow]No card cache found at {corpus_path(cache_dir)}[/].\n"
+            "Run [bold]tcgp-deck-genie sync[/] first."
+        )
+
+    console.print()
+
+    if mission_summary:
+        _print_cache_section("Mission decks", mission_summary, "Decks", "deck_count")
+    else:
+        console.print(
+            f"[yellow]No mission cache found at {missions_path(cache_dir)}[/].\n"
+            "Run [bold]tcgp-deck-genie sync-missions[/] first."
+        )
+
+    if card_summary is None:
+        raise SystemExit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +313,7 @@ def missions(
     """
     corpus = _load_or_fail(ctx)
     mission_corpus = _load_missions_or_fail(ctx)
-    by_id = {c.id: c for c in corpus.cards}
+    by_id = corpus.by_id()
 
     if query:
         name = " ".join(query)
@@ -511,7 +532,7 @@ def build_deck_cmd(
     from the opponent's weaknesses when omitted.
     """
     corpus = _load_or_fail(ctx)
-    by_id = {c.id: c for c in corpus.cards}
+    by_id = corpus.by_id()
 
     if counter_mission and counter_file:
         console.print("[red]Use only one of --counter-mission / --counter-file.[/]")
@@ -647,9 +668,29 @@ def _resolve_opponent(
 def show_deck_cmd(ctx: click.Context, path: Path) -> None:
     """Pretty-print a deck previously saved with --out."""
     corpus = _load_or_fail(ctx)
-    payload = json.loads(path.read_text())
-    deck = DeckPlan.model_validate(payload["deck"])
-    by_id = {c.id: c for c in corpus.cards}
+
+    try:
+        payload = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        console.print(f"[red]Invalid deck file (not valid JSON):[/] {exc}")
+        raise SystemExit(2) from exc
+    if not isinstance(payload, dict):
+        console.print("[red]Invalid deck file:[/] expected a JSON object at the top level.")
+        raise SystemExit(2)
+    if "deck" not in payload:
+        console.print(
+            "[red]Invalid deck file:[/] missing [bold]deck[/] key. "
+            "Use a file saved with [bold]build-deck --out[/]."
+        )
+        raise SystemExit(2)
+
+    try:
+        deck = DeckPlan.model_validate(payload["deck"])
+    except ValidationError as exc:
+        console.print(f"[red]Invalid deck file:[/] {exc}")
+        raise SystemExit(2) from exc
+
+    by_id = corpus.by_id()
     used = [by_id[e.card_id] for e in deck.cards if e.card_id in by_id]
     warnings = payload.get("validation_warnings", [])
     result = BuildResult(

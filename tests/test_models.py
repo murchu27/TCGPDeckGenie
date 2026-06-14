@@ -226,3 +226,11 @@ def test_parse_counter_deck_reads_example_file():
     assert name == "Misty's Tide"
     assert energy == ["Water"]
     assert sum(e.count for e in cards) == 20
+
+
+@pytest.mark.parametrize("damage,expected", [
+    (None, 0), ("", 0), ("80", 80), ("80+", 80), ("no digits", 0),
+])
+def test_attack_parsed_damage(damage, expected):
+    attack = Attack(name="Tackle", cost=["Colorless"], damage=damage)
+    assert attack.parsed_damage == expected
