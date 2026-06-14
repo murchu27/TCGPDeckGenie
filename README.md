@@ -220,4 +220,4 @@ Pokémon TCG Pocket has tight format constraints (20 cards, 1-3 energy types, no
 
 ## License
 
-MIT.
+GPL v3.
