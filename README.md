@@ -1,3 +1,6 @@
+[![CI](https://github.com/murchu27/TCGPDeckGenie/actions/workflows/ci.yml/badge.svg)](https://github.com/murchu27/TCGPDeckGenie/actions/workflows/ci.yml)
+![GitHub License](https://img.shields.io/github/license/murchu27/TCGPDeckGenie)
+
 # TCGPDeckGenie
 
 A small portfolio-grade Python application that designs **Pokémon TCG Pocket** decks by combining:
@@ -185,7 +188,7 @@ TCGdex SDK ──[ sync, once ]──▶ local JSON cache
 ```text
 tcgp-deck-genie sync           # download the TCGP corpus (one-time, ~30-90 s)
 tcgp-deck-genie sync-missions  # download solo-battle opponent decks (one-time)
-tcgp-deck-genie info           # print cache summary
+tcgp-deck-genie info           # print card corpus and mission cache summaries
 tcgp-deck-genie search         # filter the local corpus, no API cost
 tcgp-deck-genie missions       # list/search/show solo-battle decks, no API cost
 tcgp-deck-genie build-deck     # produce a 20-card deck via Gemini
