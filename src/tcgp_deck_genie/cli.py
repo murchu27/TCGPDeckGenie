@@ -313,7 +313,7 @@ def missions(
     """
     corpus = _load_or_fail(ctx)
     mission_corpus = _load_missions_or_fail(ctx)
-    by_id = {c.id: c for c in corpus.cards}
+    by_id = corpus.by_id()
 
     if query:
         name = " ".join(query)
@@ -532,7 +532,7 @@ def build_deck_cmd(
     from the opponent's weaknesses when omitted.
     """
     corpus = _load_or_fail(ctx)
-    by_id = {c.id: c for c in corpus.cards}
+    by_id = corpus.by_id()
 
     if counter_mission and counter_file:
         console.print("[red]Use only one of --counter-mission / --counter-file.[/]")
@@ -670,7 +670,7 @@ def show_deck_cmd(ctx: click.Context, path: Path) -> None:
     corpus = _load_or_fail(ctx)
     payload = json.loads(path.read_text())
     deck = DeckPlan.model_validate(payload["deck"])
-    by_id = {c.id: c for c in corpus.cards}
+    by_id = corpus.by_id()
     used = [by_id[e.card_id] for e in deck.cards if e.card_id in by_id]
     warnings = payload.get("validation_warnings", [])
     result = BuildResult(
