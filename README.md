@@ -41,6 +41,10 @@ tcgp-deck-genie build-deck \
 tcgp-deck-genie show-deck water_aggro.deck.json
 ```
 
+## Demo
+
+![Demo Video](demo.gif)
+
 ## Countering mission decks
 
 TCG Pocket's solo battles pit you against fixed AI decks. TCGPDeckGenie can fetch
