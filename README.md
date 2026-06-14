@@ -12,9 +12,7 @@ The whole thing is built to be **runnable on Gemini's free tier**. The architect
 ## Quickstart
 
 ```bash
-git clone <this repo>
-cd TCGPDeckGenie
-
+# Clone and enter the repo
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
