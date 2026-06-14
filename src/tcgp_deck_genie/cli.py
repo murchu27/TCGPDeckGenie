@@ -668,8 +668,28 @@ def _resolve_opponent(
 def show_deck_cmd(ctx: click.Context, path: Path) -> None:
     """Pretty-print a deck previously saved with --out."""
     corpus = _load_or_fail(ctx)
-    payload = json.loads(path.read_text())
-    deck = DeckPlan.model_validate(payload["deck"])
+
+    try:
+        payload = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        console.print(f"[red]Invalid deck file (not valid JSON):[/] {exc}")
+        raise SystemExit(2) from exc
+    if not isinstance(payload, dict):
+        console.print("[red]Invalid deck file:[/] expected a JSON object at the top level.")
+        raise SystemExit(2)
+    if "deck" not in payload:
+        console.print(
+            "[red]Invalid deck file:[/] missing [bold]deck[/] key. "
+            "Use a file saved with [bold]build-deck --out[/]."
+        )
+        raise SystemExit(2)
+
+    try:
+        deck = DeckPlan.model_validate(payload["deck"])
+    except ValidationError as exc:
+        console.print(f"[red]Invalid deck file:[/] {exc}")
+        raise SystemExit(2) from exc
+
     by_id = corpus.by_id()
     used = [by_id[e.card_id] for e in deck.cards if e.card_id in by_id]
     warnings = payload.get("validation_warnings", [])
