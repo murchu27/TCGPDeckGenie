@@ -1,0 +1,25 @@
+{
+  "_format": {
+    "description": "Opponent deck for `build-deck --counter-file`. Only `cards` is required.",
+    "fields": {
+      "name": "Optional label shown in counter mode (defaults to the filename stem).",
+      "energy_types": "Optional 1-3 energy types; inferred from Pokémon in your cache when omitted.",
+      "cards": "Required. Each entry: card_id (TCGdex id) and count (1-2)."
+    },
+    "note": "Full decks saved with `build-deck --out` (including strategy and other LLM fields) also work."
+  },
+  "name": "Misty's Tide",
+  "energy_types": ["Water"],
+  "cards": [
+    { "card_id": "A1-079", "count": 2 },
+    { "card_id": "A1-220", "count": 2 },
+    { "card_id": "A1-101", "count": 2 },
+    { "card_id": "A1-053", "count": 2 },
+    { "card_id": "A1-054", "count": 2 },
+    { "card_id": "A1-056", "count": 2 },
+    { "card_id": "A1-223", "count": 2 },
+    { "card_id": "P-A-007", "count": 2 },
+    { "card_id": "A1-077", "count": 2 },
+    { "card_id": "A1-078", "count": 2 }
+  ]
+}

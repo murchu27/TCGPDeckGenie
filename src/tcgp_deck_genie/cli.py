@@ -9,6 +9,7 @@ from pathlib import Path
 
 import click
 from dotenv import load_dotenv
+from pydantic import ValidationError
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -42,7 +43,7 @@ from .missions import (
     load_missions,
     save_missions,
 )
-from .models import ENERGY_TYPES, Card, DeckPlan
+from .models import ENERGY_TYPES, Card, DeckPlan, DeckEntry, OpponentDeckSpec
 from .search import SearchFilter, apply_filter
 from .tcgp_client import FetchProgress, TCGPClient
 
@@ -441,7 +442,7 @@ def _summarise_attacks(card: Card) -> str:
     "--counter-file",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Path to a saved deck JSON (from --out) to build a counter against.",
+    help="Path to an opponent deck JSON (minimal card list or a saved --out file).",
 )
 @click.option("--set", "set_ids", multiple=True, help="Limit candidate pool to these sets.")
 @click.option(
@@ -586,12 +587,27 @@ def build_deck_cmd(
         console.print(f"[green]✓[/] Saved deck to [bold]{out}[/]")
 
 
+def _parse_counter_deck(payload: dict) -> tuple[str | None, list[str] | None, list[DeckEntry]]:
+    """Parse JSON for ``--counter-file``.
+
+    Accepts either a minimal :class:`OpponentDeckSpec` (at the root or under
+    ``deck``) or a full :class:`DeckPlan` saved via ``build-deck --out`` (detected
+    by the presence of ``strategy``).
+    """
+    inner = payload.get("deck", payload)
+    if "strategy" in inner:
+        plan = DeckPlan.model_validate(inner)
+        return plan.name, list(plan.energy_types), plan.cards
+    spec = OpponentDeckSpec.model_validate(inner)
+    return spec.name, spec.energy_types, spec.cards
+
+
 def _resolve_opponent(
     ctx: click.Context,
     by_id: dict[str, Card],
     counter_mission: str | None,
     counter_file: Path | None,
-) -> tuple[list[Card], list[str], str]:
+) -> tuple[list[Card], list[str] | None, str]:
     """Resolve the opponent deck into (cards, energy_types, label)."""
     if counter_mission:
         mission_corpus = _load_missions_or_fail(ctx)
@@ -603,15 +619,21 @@ def _resolve_opponent(
         cards = [by_id[cid] for cid in deck.resolved_card_ids() if cid in by_id]
         return cards, deck.energy_types, deck.name
 
-    # counter_file: a saved deck JSON produced by --out.
-    payload = json.loads(Path(counter_file).read_text())
-    deck_obj = DeckPlan.model_validate(payload["deck"])
+    # counter_file: minimal opponent spec or a saved deck JSON from --out.
+    path = Path(counter_file)
+    payload = json.loads(path.read_text())
+    try:
+        name, energy_types, entries = _parse_counter_deck(payload)
+    except ValidationError as exc:
+        console.print(f"[red]Invalid counter deck file:[/] {exc}")
+        raise SystemExit(2) from exc
     cards: list[Card] = []
-    for entry in deck_obj.cards:
+    for entry in entries:
         card = by_id.get(entry.card_id)
         if card is not None:
             cards.extend([card] * entry.count)
-    return cards, list(deck_obj.energy_types), deck_obj.name
+    label = name or path.stem
+    return cards, list(energy_types) if energy_types else None, label
 
 
 # ---------------------------------------------------------------------------

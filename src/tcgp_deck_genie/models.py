@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Valid Pokémon TCG energy / type strings used in TCG Pocket.
 ENERGY_TYPES: tuple[str, ...] = (
@@ -206,6 +206,39 @@ class DeckPlan(BaseModel):
     @field_validator("energy_types")
     @classmethod
     def _validate_energy(cls, v: list[str]) -> list[str]:
+        bad = [t for t in v if t not in ENERGY_TYPES]
+        if bad:
+            raise ValueError(f"Unknown energy type(s): {bad}; allowed={ENERGY_TYPES}")
+        return v
+
+    @property
+    def total_cards(self) -> int:
+        return sum(e.count for e in self.cards)
+
+
+class OpponentDeckSpec(BaseModel):
+    """Minimal opponent deck for ``build-deck --counter-file``.
+
+    Only the card list is required. ``name`` and ``energy_types`` are optional;
+    energy types are inferred from the cached Pokémon when omitted.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str | None = Field(None, description="Optional label shown in counter mode.")
+    energy_types: list[str] | None = Field(
+        None,
+        description="Optional 1-3 energy types; inferred from Pokémon in the corpus when omitted.",
+    )
+    cards: list[DeckEntry] = Field(..., min_length=1, description="Opponent deck list.")
+
+    @field_validator("energy_types")
+    @classmethod
+    def _validate_energy(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        if not 1 <= len(v) <= 3:
+            raise ValueError("energy_types must contain 1-3 entries when provided")
         bad = [t for t in v if t not in ENERGY_TYPES]
         if bad:
             raise ValueError(f"Unknown energy type(s): {bad}; allowed={ENERGY_TYPES}")

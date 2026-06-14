@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
+from tcgp_deck_genie.cli import _parse_counter_deck as parse_counter_deck
 from tcgp_deck_genie.models import (
     ENERGY_TYPES,
     Ability,
@@ -11,6 +13,7 @@ from tcgp_deck_genie.models import (
     Card,
     DeckEntry,
     DeckPlan,
+    OpponentDeckSpec,
 )
 
 
@@ -156,3 +159,70 @@ def test_ability_is_used_in_compact_dict():
     d = card.compact_dict()
     assert d["suffix"] == "EX"
     assert d["abilities"] == [{"n": "Frost Bind", "fx": "Switch out."}]
+
+
+def test_opponent_deck_spec_cards_only():
+    spec = OpponentDeckSpec.model_validate(
+        {"cards": [{"card_id": "A1-079", "count": 2}]}
+    )
+    assert spec.name is None
+    assert spec.energy_types is None
+    assert spec.total_cards == 2
+
+
+def test_opponent_deck_spec_ignores_unknown_keys():
+    spec = OpponentDeckSpec.model_validate(
+        {
+            "_format": {"description": "docs"},
+            "name": "Rival",
+            "cards": [{"card_id": "A1-079", "count": 1}],
+        }
+    )
+    assert spec.name == "Rival"
+
+
+def test_parse_counter_deck_minimal_root():
+    name, energy, cards = parse_counter_deck(
+        {"cards": [{"card_id": "A1-079", "count": 2}]}
+    )
+    assert name is None
+    assert energy is None
+    assert len(cards) == 1
+    assert cards[0].card_id == "A1-079"
+
+
+def test_parse_counter_deck_minimal_under_deck_key():
+    name, energy, cards = parse_counter_deck(
+        {
+            "deck": {
+                "name": "Misty's Tide",
+                "energy_types": ["Water"],
+                "cards": [{"card_id": "A1-079", "count": 2}],
+            }
+        }
+    )
+    assert name == "Misty's Tide"
+    assert energy == ["Water"]
+    assert cards[0].count == 2
+
+
+def test_parse_counter_deck_full_saved_deck():
+    plan = DeckPlan(
+        name="Saved",
+        energy_types=["Water"],
+        cards=[DeckEntry(card_id="A1-079", count=2)],
+        strategy="Attack with Lapras.",
+    )
+    name, energy, cards = parse_counter_deck({"deck": plan.model_dump(mode="json")})
+    assert name == "Saved"
+    assert energy == ["Water"]
+    assert cards[0].card_id == "A1-079"
+
+
+def test_parse_counter_deck_reads_example_file():
+    path = Path(__file__).resolve().parents[1] / "example_opponent.json"
+    payload = json.loads(path.read_text())
+    name, energy, cards = parse_counter_deck(payload)
+    assert name == "Misty's Tide"
+    assert energy == ["Water"]
+    assert sum(e.count for e in cards) == 20

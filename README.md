@@ -57,8 +57,9 @@ tcgp-deck-genie build-deck \
     --counter-mission "Charizard ex and Moltres ex" \
     --out anti_charizard.deck.json
 
-# You can also counter any deck you previously saved with --out:
-tcgp-deck-genie build-deck --counter-file water_aggro.deck.json
+# You can also counter a hand-written opponent deck (see example_opponent.json)
+# or any deck you previously saved with --out:
+tcgp-deck-genie build-deck --counter-file example_opponent.json
 ```
 
 Before the LLM is involved, the opponent deck is digested locally into a compact
@@ -70,6 +71,13 @@ Mission data comes from [Bulbapedia](https://bulbapedia.bulbagarden.net)'s
 "List of &lt;expansion&gt; solo battles in Pokémon TCG Pocket" pages, fetched via the
 MediaWiki API and cached locally. Bulbapedia content is licensed
 [CC BY-NC-SA 2.5](https://creativecommons.org/licenses/by-nc-sa/2.5/).
+
+### Opponent deck JSON (`--counter-file`)
+
+To counter a custom list, pass a JSON file with the opponent's cards. Only
+`cards` is required; see [`example_opponent.json`](example_opponent.json) for the
+format. Decks saved with `build-deck --out` (which include strategy and other
+LLM fields) are also accepted.
 
 ## What you get back
 
@@ -190,7 +198,7 @@ Run any subcommand with `--help` for its full option list. Key flags on `build-d
 | --- | --- | --- |
 | `--energy` | – | One of `Grass Fire Water Lightning Psychic Fighting Darkness Metal Dragon Colorless`. Required unless in counter mode (then auto-picked from opponent weaknesses if omitted). |
 | `--counter-mission` | – | Name of a cached solo-battle mission to counter. |
-| `--counter-file` | – | Path to a saved deck JSON (from `--out`) to counter. |
+| `--counter-file` | – | Path to an opponent deck JSON ([`example_opponent.json`](example_opponent.json) or a saved `--out` file). |
 | `--brief` | `"Build a strong, fun deck."` | Short free-text framing of the deck. |
 | `--set` (repeatable) | all TCGP sets | Restrict candidates to specific sets. |
 | `--keyword` (repeatable) | – | Substring(s) that must appear in card name/text. |
