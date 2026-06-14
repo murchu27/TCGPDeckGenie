@@ -5,14 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tcgp-deck-genie"
 version = "0.1.0"
-description = "A portfolio project that uses the TCGdex SDK and Google Gemini to design Pokémon TCG Pocket decks with explicit reasoning about card synergy."
+description = "A CLI tool that uses the TCGdex SDK and Google Gemini to design Pokémon TCG Pocket decks with explicit reasoning about card synergy."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
-authors = [{ name = "TCGPDeckGenie contributors" }]
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "Michael Murphy" }]
 keywords = ["pokemon", "tcg", "tcgp", "gemini", "deck-builder", "llm"]
 classifiers = [
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -41,8 +42,8 @@ dev = [
 tcgp-deck-genie = "tcgp_deck_genie.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/tcgdex/python-sdk"
-Issues = "https://github.com/tcgdex/python-sdk/issues"
+Homepage = "https://github.com/murchu27/TCGPDeckGenie"
+Issues = "https://github.com/murchu27/TCGPDeckGenie/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
